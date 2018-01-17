@@ -22,8 +22,9 @@ HalideFilterArgument = struct
   name: 'string'
   kind: 'int32'
   dimensions: 'int32'
-  type_code: 'int32'
-  type_bits: 'int32'
+  type_code: 'uint8'
+  type_bits: 'uint8'
+  type_lanes: 'uint16'
   def: ref.refType('void')
   min: ref.refType('void')
   max: ref.refType('void')
@@ -252,12 +253,11 @@ class LibBinder
     @close()
 
     @renderLibrary = ffi.DynamicLibrary( libpath, DLFLAGS.RTLD_NOW )
-    rawfn = @renderLibrary.get fnname
+    rawfn = @renderLibrary.get fnname + "_old_buffer_t"
 
-    struct = @renderLibrary.get fnname + "_metadata"
-    struct = struct.reinterpret(HalideFilterMetadata.size)
-    metadata = new HalideFilterMetadata(struct)
-
+    metadataGetter = @renderLibrary.get fnname + "_metadata"
+    metadataGetterFn = ffi.ForeignFunction metadataGetter, ref.refType(HalideFilterMetadata), []
+    metadata = metadataGetterFn().deref()
     if metadata.version != 0
       throw new Error "Unknown Filter Metadata version: " + metadata.version
 
