@@ -14,11 +14,12 @@ Installation/Setup
 ------------------
 
 Prerequisites:
-* A copy of [Github's Atom Editor][atom] (most recently tested with 1.3.2).
+* A copy of [Github's Atom Editor][atom] (most recently tested with 1.23.3).
 * A C++ build toolchain: Xcode on the Mac, Visual Studio on Windows, make and g++ on Linux.
+	With VS2017 you need to install the v140 toolset as well and use a "Developer command prompt for VS2017".
 * A [binary distribution of Halide][halide-release] or a compatible version [built from source][halide-git].
 
-	Note that because Atomic Halide dynamically links to compiled Halide filters and calls them with an FFI, you must pick a binary distribution whose architecture that matches that of Atom itself. As of this writing, that is 64-bit on Mac and Linux and 32-bit on Windows.
+	Note that because Atomic Halide dynamically links to compiled Halide filters and calls them with an FFI, you must pick a binary distribution whose architecture that matches that of Atom itself. As of this writing, that is 64-bit on Mac, Linux and Windows.
 * A working version of Python (used by node-gyp to install native node modules via Atom's package manager).
 
 	I used 32-bit Python 2.7.10 from [python.org][python] on Windows and the pre-installed versions of Python on Mac and Linux). As of this writing, node-gyp is not compatible with Python 3 and its error message when failing to build due to a missing or incorrect version of Python is not obvious.

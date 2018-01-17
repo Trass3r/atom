@@ -3,28 +3,31 @@
 
 path = require 'path'
 
-vcInstallDir = "C:\\Program Files (x86)\\Microsoft Visual Studio 12.0\\VC"
-kitsDir = "C:\\Program Files (x86)\\Windows Kits\\8.1"
+vcInstallDir = "C:\\Program Files (x86)\\Microsoft Visual Studio 14.0\\VC"
+kitsDir = "C:\\Program Files (x86)\\Windows Kits\\10"
+win10ver = "10.0.16299.0"
 
 INCLUDE = [
   (path.join vcInstallDir, "INCLUDE"),
   (path.join vcInstallDir, "ATLMFC", "INCLUDE"),
-  (path.join kitsDir, "include", "shared"),
-  (path.join kitsDir, "include", "um")
+  (path.join kitsDir, "include", win10ver, "ucrt"),
+  (path.join kitsDir, "include", win10ver, "shared"),
+  (path.join kitsDir, "include", win10ver, "um")
 ]
 
 LIBPATH = [
-  (path.join vcInstallDir, "LIB"),
-  (path.join vcInstallDir, "ATLMFC", "LIB")
+  (path.join vcInstallDir, "lib"),
+  (path.join vcInstallDir, "atlmfc", "lib")
 ]
 
 LIB = [
-  (path.join vcInstallDir, "LIB"),
-  (path.join vcInstallDir, "ATLMFC", "LIB"),
-  (path.join kitsDir, "lib", "winv6.3", "um", "x86")
+  (path.join vcInstallDir, "lib", "amd64"),
+  (path.join vcInstallDir, "atlmfc", "lib", "amd64")
+  (path.join kitsDir, "lib", win10ver, "ucrt", "x64")
+  (path.join kitsDir, "lib", win10ver, "um", "x64")
 ]
 
-binPath = path.join vcInstallDir, "BIN"
+binPath = path.join vcInstallDir, "bin", "amd64"
 
 Path = [
   binPath,
