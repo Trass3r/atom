@@ -21,7 +21,6 @@ build\$(STEM).def:
 	echo EXPORTS >> $@
 	echo	render @1 >> $@
 	echo	render_metadata @2 >> $@
-	echo	render_old_buffer_t @3 >> $@
 
 build\tmp\$(STEM)_fn.obj: build\tmp\$(STEM)_fn.cpp
 	$(CXX) /c /EHsc /I $(HALIDE_PATH)\include build\tmp\$(STEM)_fn.cpp /Fo:$@

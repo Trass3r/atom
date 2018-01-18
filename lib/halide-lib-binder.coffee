@@ -7,16 +7,25 @@ ref = require 'ref'
 struct = require 'ref-struct'
 ArrayType = require 'ref-array'
 
+HalideDimension = struct
+  min: 'int32'
+  extent: 'int32'
+  stride: 'int32'
+  flags: 'uint32'
+
 HalideBuffer = struct
-  dev: 'uint64',
+  dev: 'uint64'
+  devInterface: ref.refType('void')
   host: ref.refType('uint8')
-  extent: ArrayType('uint32', 4)
-  stride: ArrayType('uint32', 4)
-  min: ArrayType('uint32', 4)
-  elem_size: 'uint32'
-  #only used by GPU, but may need special alignment tweaks
-  host_dirty: 'bool'
-  dev_dirty: 'bool'
+  flags: 'uint64'
+  # type of each buffer element
+  type_code: 'uint8'
+  type_bits: 'uint8'
+  type_lanes: 'uint16'
+
+  dimensions: 'int32'
+  dim: ArrayType(HalideDimension)
+  padding: ref.refType('void')
 
 HalideFilterArgument = struct
   name: 'string'
@@ -46,21 +55,18 @@ makeBuffer = (width, height, channels) ->
   nbuf = new Buffer(width * height * channels)
 
   hbuf.dev = 0
-  hbuf.elem_size = 1
+  hbuf.devInterface = ref.NULL
   hbuf.host = nbuf
-  hbuf.min[0] = 0
-  hbuf.min[1] = 0
-  hbuf.min[2] = 0
-  hbuf.min[3] = 0
-  hbuf.extent[0] = width
-  hbuf.extent[1] = height
-  hbuf.extent[2] = channels
-  hbuf.extent[3] = 0
-  hbuf.stride[0] = 1
-  hbuf.stride[1] = width
-  hbuf.stride[2] = width * height
-  hbuf.stride[3] = 0
-
+  hbuf.flags = 0
+  hbuf.type_code = 1
+  hbuf.type_bits = 8
+  hbuf.type_lanes = 1
+  hbuf.dimensions = 3
+  dims = new ArrayType(HalideDimension)(3)
+  dims[0] = new HalideDimension({ min: 0, extent: width, stride: 1, flags: 0 })
+  dims[1] = new HalideDimension({ min: 0, extent: height, stride: width, flags: 0 })
+  dims[2] = new HalideDimension({ min: 0, extent: channels, stride: width * height, flags: 0 })
+  hbuf.dim = dims.buffer
   [ hbuf, nbuf ]
 
 class InputBuffer
@@ -74,10 +80,10 @@ class InputBuffer
     @buffer.ref()
 
   width: ->
-    @buffer.stride[1]
+    @buffer.dim[1].stride
 
   plane: ->
-    @buffer.stride[2]
+    @buffer.dim[2].stride
 
   fillWithCheckerboard: (size) ->
     width = @width()
@@ -253,7 +259,7 @@ class LibBinder
     @close()
 
     @renderLibrary = ffi.DynamicLibrary( libpath, DLFLAGS.RTLD_NOW )
-    rawfn = @renderLibrary.get fnname + "_old_buffer_t"
+    rawfn = @renderLibrary.get fnname
 
     metadataGetter = @renderLibrary.get fnname + "_metadata"
     metadataGetterFn = ffi.ForeignFunction metadataGetter, ref.refType(HalideFilterMetadata), []
