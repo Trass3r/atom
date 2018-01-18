@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
         Halide::Target target = Halide::get_target_from_environment();
         target.set_feature(Halide::Target::Feature::UserContext);
 
-        theFunc.compile_to_object(argv[1] + std::string(".o"), arguments, argv[2], target);
+        theFunc.compile_to_file(argv[1], arguments, argv[2], target);
 
         return 0;
     }

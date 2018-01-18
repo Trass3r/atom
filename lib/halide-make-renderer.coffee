@@ -44,7 +44,7 @@ if process.platform == 'win32'
       env: env
       cwd: rootdir
 
-    args = ["/f", "NMakefile", libname]
+    args = ["/nologo", "/f", "NMakefile", libname]
 
     runCollectingErrOutput cmd, true, opts, args, callback
 
