@@ -8,34 +8,27 @@ build\tmp:
 	mkdir build\tmp
 
 build\tmp\$(STEM)_fn.cpp: $(STEM).cpp NMakefile build\tmp
-	echo #include "Halide.h" > $@
-	echo using namespace Halide; >> $@
-	echo Func getFunction() { >> $@
-	echo Func result; >> $@
-	type $(STEM).cpp >> $@
-	echo return result; >> $@
-	echo } >> $@
+	copy $(STEM).cpp $@
+	type $(HALIDE_PATH)\tools\GenGen.cpp >> $@
 
 build\$(STEM).def:
 	echo LIBRARY $(STEM) > $@
 	echo EXPORTS >> $@
 	echo	render @1 >> $@
 	echo	render_metadata @2 >> $@
+	echo	halide_set_error_handler @3 >> $@
 
 build\tmp\$(STEM)_fn.obj: build\tmp\$(STEM)_fn.cpp
 	$(CXX) /nologo /c /W3 /O2 /EHsc /I $(HALIDE_PATH)\include build\tmp\$(STEM)_fn.cpp /Fo:$@
 
-build\tmp\main.obj: main.cpp
-	$(CXX) /nologo /c /W3 /O2 /EHsc /I $(HALIDE_PATH)\include main.cpp /Fo:$@
-
 build\tmp\Halide.dll: $(HALIDE_PATH)\Release\Halide.dll
 	copy $(HALIDE_PATH)\Release\Halide.dll build\tmp
 
-build\tmp\mk_$(STEM).exe: build\tmp\$(STEM)_fn.obj build\tmp\main.obj build\tmp\Halide.dll
-	$(CXX) /EHsc /I $(HALIDE_PATH)\include /Fe:$@ $(HALIDE_PATH)\Release\Halide.lib build\tmp\$(STEM)_fn.obj build\tmp\main.obj
+build\tmp\mk_$(STEM).exe: build\tmp\$(STEM)_fn.obj build\tmp\Halide.dll
+	$(CXX) /nologo /EHsc /I $(HALIDE_PATH)\include /Fe:$@ $(HALIDE_PATH)\Release\Halide.lib build\tmp\$(STEM)_fn.obj
 
 build\$(STEM).obj: build\tmp\mk_$(STEM).exe
-	build\tmp\mk_$(STEM) build\$(STEM) render
+	build\tmp\mk_$(STEM) -n $(STEM) -o build target=host -e o -g generator -f render
 
 clean:
 	del /q /s /f build

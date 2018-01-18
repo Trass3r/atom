@@ -237,6 +237,7 @@ module.exports.LibBinder =
 class LibBinder
   renderLibrary: null
   renderFunction: null
+  errorCallback: null
   output: null
   outbuf: null
 
@@ -277,11 +278,20 @@ class LibBinder
     errorBuffer = new Buffer(4096)
     wasError = true
 
+    @errorCallback = ffi.Callback('void', [ ref.refType('void'), 'string' ],
+        (context, msg) ->
+            errorBuffer = Buffer.from(msg)
+    );
+
+    setHandler = @renderLibrary.get 'halide_set_error_handler'
+    setHandlerFn = ffi.ForeignFunction setHandler, 'void', [ref.refType('void')]
+    setHandlerFn @errorCallback
+
     @renderFunction = ->
       if wasError
         errorBuffer.fill '\0'
 
-      result = [errorBuffer]
+      result = []
       for arg in vars
         result.push args[arg.name]
       result.push @output.ref()

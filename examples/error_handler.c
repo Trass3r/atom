@@ -1,7 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-void halide_error(void *user_context, const char *msg)
+void error_handler(void *user_context, const char *msg)
 {
     if (user_context) {
         char *buffer = (char *) user_context;
