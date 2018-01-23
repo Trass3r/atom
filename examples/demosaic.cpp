@@ -34,165 +34,66 @@ Func interleave_y(Func a, Func b)
     return out;
 }
 
-class Demosaic : public Halide::Generator<Demosaic>
+struct Demosaic final : public Halide::Generator<Demosaic>
 {
-public:
-    GeneratorParam<LoopLevel> intermed_compute_at{"intermed_compute_at", LoopLevel::inlined()};
-    GeneratorParam<LoopLevel> intermed_store_at{"intermed_store_at", LoopLevel::inlined()};
-    GeneratorParam<LoopLevel> output_compute_at{"output_compute_at", LoopLevel::inlined()};
+    Input<Func> input{"input", Int(16), 3}; // in RGGB bands
+    Output<Func> output{"output", Int(16), 3};
 
-    // Inputs and outputs
-    Input<Func> deinterleaved{ "deinterleaved", Int(16), 3 };
-    Output<Func> output{ "output", Int(16), 3 };
+    Func _(R), _(Gr), _(Gb), _(B);
 
-    // Defines outputs using inputs
     void generate()
     {
-        // These are the values we already know from the input
-        // x_y = the value of channel x at a site in the input of channel y
-        // gb refers to green sites in the blue rows
-        // gr refers to green sites in the red rows
+        // pattern:
+        // G B
+        // R G
+        R (x, y) = input(x + 1, y + 1, 0);
+        Gb(x, y) = input(x + 1, y + 1, 1);
+        Gr(x, y) = input(x + 1, y + 1, 2);
+        B (x, y) = input(x + 1, y + 1, 3);
 
-        // Give more convenient names to the four channels we know
-        Func r_r("r_r"), g_gr("g_gr"), g_gb("g_gb"), b_b("b_b");
+        // TODO: BoundaryConditions::repeat_edge
 
-        g_gr(x, y) = deinterleaved(x, y, 0);
-        r_r(x, y)  = deinterleaved(x, y, 1);
-        b_b(x, y)  = deinterleaved(x, y, 2);
-        g_gb(x, y) = deinterleaved(x, y, 3);
+        // even rows = blue
+        auto Ghb = (Gb(x, y) + Gb(x+1, y)) / 2  + (2 * B(x, y) - B(x-1, y) - B(x+1, y)) / 4;
+        // odd rows = red
+        auto Ghr = (Gr(x-1, y) + Gr(x, y)) / 2  + (2 * R(x, y) - R(x-1, y) - R(x+1, y)) / 4;
 
-        // These are the ones we need to interpolate
-        Func b_r("b_r"), g_r("g_r"), b_gr("b_gr"), r_gr("r_gr"), b_gb("b_gb"), r_gb("r_gb"), r_b("r_b"), g_b("g_b");
+        // even cols = red
+        auto Gvr = (Gb(x, y) + Gb(x, y+1)) / 2  + (2 * R(x, y) - R(x, y-1) - R(x, y+1)) / 4;
+        // odd cols = blue
+        auto Gvb = (Gr(x, y-1) + Gr(x, y)) / 2  + (2 * B(x, y) - B(x, y-1) - B(x, y+1)) / 4;
 
-        // First calculate green at the red and blue sites
+        Func _(Gh), _(Gv);
+        Gh(x, y) = select(y % 2 == 0, Ghb, Ghr);
+        Gv(x, y) = select(x % 2 == 0, Gvr, Gvb);
 
-        // Try interpolating vertically and horizontally. Also compute
-        // differences vertically and horizontally. Use interpolation in
-        // whichever direction had the smallest difference.
-        Expr gv_r  = avg(g_gb(x, y-1), g_gb(x, y));
-        Expr gvd_r = absd(g_gb(x, y-1), g_gb(x, y));
-        Expr gh_r  = avg(g_gr(x+1, y), g_gr(x, y));
-        Expr ghd_r = absd(g_gr(x+1, y), g_gr(x, y));
-
-        g_r(x, y)  = select(ghd_r < gvd_r, gh_r, gv_r);
-
-        Expr gv_b  = avg(g_gr(x, y+1), g_gr(x, y));
-        Expr gvd_b = absd(g_gr(x, y+1), g_gr(x, y));
-        Expr gh_b  = avg(g_gb(x-1, y), g_gb(x, y));
-        Expr ghd_b = absd(g_gb(x-1, y), g_gb(x, y));
-
-        g_b(x, y)  = select(ghd_b < gvd_b, gh_b, gv_b);
-
-        // Next interpolate red at gr by first interpolating, then
-        // correcting using the error green would have had if we had
-        // interpolated it in the same way (i.e. add the second derivative
-        // of the green channel at the same place).
-        Expr correction;
-        correction = g_gr(x, y) - avg(g_r(x, y), g_r(x-1, y));
-        r_gr(x, y) = correction + avg(r_r(x-1, y), r_r(x, y));
-
-        // Do the same for other reds and blues at green sites
-        correction = g_gr(x, y) - avg(g_b(x, y), g_b(x, y-1));
-        b_gr(x, y) = correction + avg(b_b(x, y), b_b(x, y-1));
-
-        correction = g_gb(x, y) - avg(g_r(x, y), g_r(x, y+1));
-        r_gb(x, y) = correction + avg(r_r(x, y), r_r(x, y+1));
-
-        correction = g_gb(x, y) - avg(g_b(x, y), g_b(x+1, y));
-        b_gb(x, y) = correction + avg(b_b(x, y), b_b(x+1, y));
-
-        // Now interpolate diagonally to get red at blue and blue at
-        // red. Hold onto your hats; this gets really fancy. We do the
-        // same thing as for interpolating green where we try both
-        // directions (in this case the positive and negative diagonals),
-        // and use the one with the lowest absolute difference. But we
-        // also use the same trick as interpolating red and blue at green
-        // sites - we correct our interpolations using the second
-        // derivative of green at the same sites.
-
-        correction = g_b(x, y)  - avg(g_r(x, y), g_r(x-1, y+1));
-        Expr rp_b  = correction + avg(r_r(x, y), r_r(x-1, y+1));
-        Expr rpd_b = absd(r_r(x, y), r_r(x-1, y+1));
-
-        correction = g_b(x, y)  - avg(g_r(x-1, y), g_r(x, y+1));
-        Expr rn_b  = correction + avg(r_r(x-1, y), r_r(x, y+1));
-        Expr rnd_b = absd(r_r(x-1, y), r_r(x, y+1));
-
-        r_b(x, y)  = select(rpd_b < rnd_b, rp_b, rn_b);
-
-        // Same thing for blue at red
-        correction = g_r(x, y)  - avg(g_b(x, y), g_b(x+1, y-1));
-        Expr bp_r  = correction + avg(b_b(x, y), b_b(x+1, y-1));
-        Expr bpd_r = absd(b_b(x, y), b_b(x+1, y-1));
-
-        correction = g_r(x, y)  - avg(g_b(x+1, y), g_b(x, y-1));
-        Expr bn_r  = correction + avg(b_b(x+1, y), b_b(x, y-1));
-        Expr bnd_r = absd(b_b(x+1, y), b_b(x, y-1));
-
-        b_r(x, y)  =  select(bpd_r < bnd_r, bp_r, bn_r);
-
-        // Resulting color channels
-        Func _(r), _(g), _(b);
-
-        // Interleave the resulting channels
-        r = interleave_y(interleave_x(r_gr, r_r),
-                         interleave_x(r_b, r_gb));
-        g = interleave_y(interleave_x(g_gr, g_r),
-                         interleave_x(g_b, g_gb));
-        b = interleave_y(interleave_x(b_gr, b_r),
-                         interleave_x(b_b, b_gb));
-
-        output(x, y, c) = select(c == 0, r(x, y),
-                                 c == 1, g(x, y),
-                                         b(x, y));
-
-        // These are the stencil stages we want to schedule
-        // separately. Everything else we'll just inline.
-        intermediates.push_back(g_r);
-        intermediates.push_back(g_b);
+        output(x, y, c) = Gh(max(x/2-2, 0), max(y/2-2, 0));
     }
 
-    void schedule() {
-        Pipeline p(output);
-
+    void schedule()
+    {
         if (auto_schedule)
             return;
 
-        int vec = get_target().natural_vector_size(UInt(16));
-        for (Func f : intermediates)
-        {
-            f.compute_at(intermed_compute_at)
-                .store_at(intermed_store_at)
-                .vectorize(x, 2*vec, TailStrategy::RoundUp)
-                .fold_storage(y, 4);
-        }
-        intermediates[1].compute_with(
-            intermediates[0], x,
-            {{x, LoopAlignStrategy::AlignStart}, {y, LoopAlignStrategy::AlignStart}});
-        output.compute_at(output_compute_at)
-            .vectorize(x)
-            .unroll(y)
-            .reorder(c, x, y)
-            .unroll(c);
+        R.compute_root();
+        Gr.compute_root();
+        Gb.compute_root();
+        B.compute_root();
     }
-
-private:
-    // Intermediate stencil stages to schedule
-    std::vector<Func> intermediates;
 };
 
-struct CameraPipe : public Halide::Generator<CameraPipe>
+struct CameraPipe final : public Halide::Generator<CameraPipe>
 {
     Input<Buffer<uint8_t>> input{"input", 3};
     Output<Buffer<uint8_t>> processed{"processed", 3};
 
-    Input<bool> showRaw{"showRaw", false};
-    Input<uint16_t> zoom{"zoom", 1, 1, 10};
+    GeneratorInput<bool> showRaw{"showRaw", false};
 
     void generate();
     void schedule();
 
     Func _(deinterleaved);
+    Func _(base);
     std::unique_ptr<Demosaic> demosaiced;
 private:
     Func deinterleave(Func raw);
@@ -211,19 +112,19 @@ Func CameraPipe::deinterleave(Func raw)
 
 void CameraPipe::generate()
 {
-    Func _(base);
-    base(x, y, c) = cast<int16_t>(BoundaryConditions::repeat_edge(input)(x, y, c));
+    //base(x, y, c) = cast<uint16_t>(BoundaryConditions::mirror_image(input)(x, y, c));
+    base(x, y, c) = cast<int16_t>(input(x, y, c));
 
-    deinterleaved(x, y, c) = select(c == 0, base(2*x, 2*y, 1),
-                                    c == 1, base(2*x+1, 2*y, 2),
-                                    c == 2, base(2*x, 2*y+1, 0),
-                                            base(2*x+1, 2*y+1, 1));
+    // turn RGB into bayer AND deinterleave
+    deinterleaved(x, y, c) = select(c == 1, base(2*x, 2*y, 1),     // green0
+                                    c == 2, base(2*x+1, 2*y+1, 1), // green1
+                                    c == 0, base(2*x, 2*y+1, 0),   // red
+                                            base(2*x+1, 2*y, 2));  // blue
 
     Func _(raw);
     raw(x, y) = base(x, y, select((x%2) == (y%2), 1,
                         (x%2)==0 && (y%2) == 1, 0,
                         2));
-    //Func deinterleaved = deinterleave(shifted);
     demosaiced = create<Demosaic>();
     demosaiced->apply(deinterleaved);
 
@@ -246,39 +147,28 @@ void CameraPipe::schedule()
     }
     else
     {
+        base.compute_root();
+
         Expr out_width = processed.width();
         Expr out_height = processed.height();
-        // In HVX 128, we need 2 threads to saturate HVX with work,
-        //and in HVX 64 we need 4 threads, and on other devices,
-        // we might need many threads.
-        Expr strip_size;
-        strip_size = 32;
-        strip_size = (strip_size / 2) * 2;
-
         int vec = get_target().natural_vector_size(UInt(16));
+        Expr strip_size = 32;
+        strip_size = (strip_size / 2) * 2;
         processed.compute_root()
-        .reorder(c, x, y)
-            .split(y, yi, yii, 2, TailStrategy::RoundUp)
-            .split(yi, yo, yi, strip_size / 2)
-            .vectorize(x, 2*vec, TailStrategy::RoundUp)
-            .unroll(c)
-            .parallel(yo);
-
-        deinterleaved.compute_at(processed, yi).store_at(processed, yo)
-            .fold_storage(y, 8)
             .reorder(c, x, y)
-            .vectorize(x, 2*vec, TailStrategy::RoundUp)
-            .unroll(c);
+            //.split(y, yi, yii, 2, TailStrategy::RoundUp)
+            //.split(yi, yo, yi, strip_size / 2)
+            .vectorize(x, /* 2* */vec, TailStrategy::RoundUp)
+            .unroll(c)
+            //.parallel(yo)
+            ;
 
-        demosaiced->intermed_compute_at.set({processed, yi});
-        demosaiced->intermed_store_at.set({processed, yo});
-        //demosaiced->output_compute_at.set({curved, x});
-
-        // We can generate slightly better code if we know the splits divide the extent.
+// We can generate slightly better code if we know the splits divide the extent.
         processed
             .bound(c, 0, 3)
-            .bound(x, 0, ((out_width)/(2*vec))*(2*vec))
-            .bound(y, 0, (out_height/strip_size)*strip_size);
+//          .bound(x, 0, ((out_width)/(2*vec))*(2*vec))
+//          .bound(y, 0, (out_height/strip_size)*strip_size)
+        ;
     }
 }
 
