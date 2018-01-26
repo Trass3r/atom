@@ -63,11 +63,37 @@ struct Demosaic final : public Halide::Generator<Demosaic>
         // odd cols = blue
         auto Gvb = (Gr(x, y-1) + Gr(x, y)) / 2  + (2 * B(x, y) - B(x, y-1) - B(x, y+1)) / 4;
 
-        Func _(Gh), _(Gv);
-        Gh(x, y) = select(y % 2 == 0, Ghb, Ghr);
-        Gv(x, y) = select(x % 2 == 0, Gvr, Gvb);
+		// chrominances of reconstructed images
+		Func _(Chb), _(Chr), _(Cvb), _(Cvr);
+		Chb(x, y) = Ghb(x, y) - B(x, y);
+		Chr(x, y) = Ghr(x, y) - R(x, y);
+		Cvb(x, y) = Gvb(x, y) - B(x, y);
+		Cvr(x, y) = Gvr(x, y) - R(x, y);
 
-        output(x, y, c) = Gh(max(x/2-2, 0), max(y/2-2, 0));
+		// gradients of chrominances
+		Func _(Dhb), _(Dhr), _(Dvb), _(Dvr);
+		Dhb(x, y) = abs(Chb(x, y) - Chb(x+1, y));
+		Dhr(x, y) = abs(Chr(x, y) - Chr(x+1, y));
+		Dvb(x, y) = abs(Cvb(x, y) - Cvb(x, y+1));
+		Dvr(x, y) = abs(Cvr(x, y) - Cvr(x, y+1));
+
+		const int C = 3;
+		Func _(deltaHb), _(deltaVb), _(deltaHr), _(deltaVr);
+		deltaHb(x, y) = C * Dhb(x, y) + C * Dhb(x-1, y) + Dhb(x-1, y-1) + Dhb(x-1, y+1) + Dhb(x, y-1) + Dhb(x, y+1) + Dhr(x, y) + Dhr(x, y+1);
+		deltaHr(x, y) = C * Dhr(x, y) + C * Dhr(x-1, y) + Dhr(x-1, y-1) + Dhr(x-1, y+1) + Dhr(x, y-1) + Dhr(x, y+1) + Dhb(x-1, y-1) + Dhb(x-1, y);
+		deltaVb(x, y) = C * Dvr(x, y) + C * Dvr(x-1, y) + Dvr(x-1, y-1) + Dvr(x-1, y+1) + Dvr(x, y-1) + Dvr(x, y+1) + Dvb(x-1, y-1) + Dvb(x-1, y);
+		deltaVr(x, y) = C * Dvb(x, y) + C * Dvb(x-1, y) + Dvb(x-1, y-1) + Dvb(x-1, y+1) + Dvb(x, y-1) + Dvb(x, y+1) + Dvr(x, y) + Dvr(x, y+1);
+
+		Func _(outG);
+		outGb(x, y) = select(deltaVb < deltaHb, Gvb, Ghb);
+		outGr(x, y) = select(deltaVr < deltaHr, Gvr, Ghr);
+
+        Func _(Gh), _(Gv);
+		// Gh(x, y) = select(y % 2 == 0, Ghb, Ghr);
+		// Gv(x, y) = select(x % 2 == 0, Gvr, Gvb);
+        outG(x, y) = select(y % 2 == 0, outGb(x, y), outGr(x, y)); // TODO: / 2 ?
+
+        output(x, y, c) = outG(x, y); // Gh(max(x/2-2, 0), max(y/2-2, 0));
     }
 
     void schedule()
