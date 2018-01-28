@@ -46,17 +46,17 @@ struct Demosaic final : public Halide::Generator<Demosaic>
     Input<Func> input{"input", Int(16), 3}; // in RGGB bands
     Output<Func> output{"output", Int(16), 3};
 
-    Input<bool> hmm{"hmm", false};
+    Input<int> hmm{"hmm", false};
 
     Func _(R), _(Gr), _(Gb), _(B);
     Func _(outGb), _(outGr);
 
     void generate()
     {
-        R (x, y) = input(x + 1, y + 1, 0);
-        Gb(x, y) = input(x + 1, y + 1, 1);
-        Gr(x, y) = input(x + 1, y + 1, 2);
-        B (x, y) = input(x + 1, y + 1, 3);
+        R (x, y) = input(x, y, 0);
+        Gb(x, y) = input(x, y, 1);
+        Gr(x, y) = input(x, y, 2);
+        B (x, y) = input(x, y, 3);
 
         // TODO: BoundaryConditions::repeat_edge
 
@@ -118,49 +118,78 @@ struct Demosaic final : public Halide::Generator<Demosaic>
             select(x % 2 == 0, Gb(x/2, y/2), outGb(x/2, y/2)),
             select(x % 2 == 0, outGr(x/2, y/2), Gr(x/2, y/2))
         );
+#if 0
+        output(x, y, c) = cast<int16_t>(Eb) * 100;
+        return;
+#endif
 
         Func _(Rgr), _(Rgb), _(Bgr), _(Bgb);
         // G B G B
         // R G R G
-        // G[B]G B
+        // G B[G]B
         // R G R G
 
         // green pixels: red through bilinear interpolation of R-G
+        // B-Gb = ( B-(Gb-1) + B-(Gb+1) ) / 2
         Bgb(x, y) = Gb(x, y) + ( B(x-1, y)-Gb(x-1, y) + B(x, y)-Gb(x-1, y) )/2;
         Rgb(x, y) = Gb(x, y) + ( R(x-1, y)-Gr(x-1, y) + R(x, y)-Gr(x-1, y) )/2;
         Bgr(x, y) = Gb(x, y) + ( B(x, y)-Gb(x, y) + B(x+1, y)-Gb(x+1, y) )/2;
         Rgr(x, y) = Gr(x, y) + ( R(x, y)-Gr(x, y) + R(x+1, y)-Gr(x+1, y) )/2;
 
-        // reconstruction of the red and blue values in the blue and red pixels,
-        // respectively.
+#if 0
+        output(x, y, c) = Rgb(x/2, y/2);
+        return;
+#endif
 
-        // R-B = R-(Gb-1) + R-(Gb+1)
-        Func _(Rb), _(Br);
-        Rb(x, y) = select(Er,
-            B(x, y) + (Rgb(x, y) - Bgb(x, y) + Rgb(x + 1, y) - Bgb(x + 1, y)) / 2 // (B(x-1, y) B(x+1, y)) / 2
-            ,
-            B(x, y) + (Rgb(x, y) - Bgb(x, y) + Rgb(x, y + 1) - Bgb(x, y + 1)) / 2 // (B(x-1, y) B(x+1, y)) / 2
-        );
-        Br(x, y) = select(Eb,
-            R(x, y) + (Bgr(x, y) - Rgr(x, y) + Bgr(x + 1, y) - Rgr(x + 1, y)) / 2 // (B(x-1, y) B(x+1, y)) / 2
-            ,
-            R(x, y) + (Bgr(x, y) - Rgr(x, y) + Bgr(x, y + 1) - Rgr(x, y + 1)) / 2 // (B(x-1, y) B(x+1, y)) / 2
-        );
-
-        //output(x, y, c) = outG(x, y);
+        // reconstruction of the red and blue values in the blue and red pixels
         // G B G B
         // R G R G
+
+        // R-B = ( R-(Gb-1) + R-(Gb+1) ) / 2
+        Func _(Rbh), _(Rbv), _(Brh), _(Brv);
+        Func _(Rb), _(Br);
+        Rbh(x, y) = B(x, y) + (Rgb(x, y) - Bgb(x, y) + Rgb(x + 1, y) - Bgb(x + 1, y)) / 2;
+        Rbv(x, y) = B(x, y) + (Rgb(x, y) - Bgb(x, y) + Rgb(x, y + 1) - Bgb(x, y + 1)) / 2;
+        Brh(x, y) = R(x, y) + (Bgr(x, y) - Rgr(x, y) + Bgr(x + 1, y) - Rgr(x + 1, y)) / 2;
+        Brv(x, y) = R(x, y) + (Bgr(x, y) - Rgr(x, y) + Bgr(x, y + 1) - Rgr(x, y + 1)) / 2;
+        Rb(x, y) = select(Er, Rbh(x, y), Rbv(x, y));
+        Br(x, y) = select(Eb, Brh(x, y), Brv(x, y));
+
+#if 0
+        output(x, y, c) = select(y % 2 == 0,
+            select(x % 2 == 0, Rgb(x/2, y/2), 0),
+            select(x % 2 == 0, R(x/2, y/2), Rgr(x/2, y/2))
+        );
+        return;
+#endif
+
+        // G B G B
+        // R G R G
+        Func _(outR), _(outB);
+        outB(x, y) = select(y % 2 == 0,
+            select(x % 2 == 0, Bgb(x/2, y/2), B(x/2, y/2)),
+            select(x % 2 == 0, Br(x/2, y/2), Bgr(x/2, y/2))
+        );
+        outR(x, y) = select(y % 2 == 0,
+            select(x % 2 == 0, Rgb(x/2, y/2), Rb(x/2, y/2)),
+            select(x % 2 == 0, R(x/2, y/2), Rgr(x/2, y/2))
+        );
+
+#if 1
         output(x, y, c) = select(c == 1,
             outG(x, y),
             c == 0,
-            select(y % 2 == 0,
-                select(x % 2 == 0, Bgb(x/2, y/2), B(x/2, y/2)),
-                select(x % 2 == 0, Br(x/2, y/2), Bgr(x/2, y/2))
-            ),
-            select(y % 2 == 0,
-                select(x % 2 == 0, Rgb(x/2, y/2), Rb(x/2, y/2)),
-                select(x % 2 == 0, R(x/2, y/2), Rgr(x/2, y/2))
-            )
+            outR(x, y),
+            outG(x, y)
+        );
+        return;
+#endif
+
+        output(x, y, c) = select(c == 1,
+            outG(x, y),
+            c == 0,
+            outR(x, y),
+            outB(x, y)
         );
     }
 
@@ -184,7 +213,7 @@ struct CameraPipe final : public Halide::Generator<CameraPipe>
     Output<Buffer<uint8_t>> processed{"processed", 3};
 
     Input<bool> showRaw{"showRaw", false};
-    Input<bool> hmm{"hmm", false};
+    Input<int> samplingFactor{"samplingFactor", 4, 1, 10};
 
     void generate();
     void schedule();
@@ -210,7 +239,7 @@ Func CameraPipe::deinterleave(Func raw)
 
 void CameraPipe::generate()
 {
-    base(x, y, c) = cast<int16_t>(BoundaryConditions::mirror_image(input)(x, y, c));
+    base(x, y, c) = cast<int16_t>(BoundaryConditions::mirror_interior(input)(x, y, c));
     //base(x, y, c) = cast<int16_t>(input(x, y, c));
 
     // turn RGB into bayer AND deinterleave
@@ -223,9 +252,11 @@ void CameraPipe::generate()
                         (x%2)==0 && (y%2) == 1, 0,
                         2));
     demosaiced = create<Demosaic>();
-    demosaiced->apply(deinterleaved, hmm);
+    demosaiced->apply(deinterleaved, 0);
 
-    Expr forDisplay = select(showRaw, raw(x, y), demosaiced->output(x, y, c));
+    Expr forDisplay = select(showRaw,
+        raw(x/samplingFactor, y/samplingFactor),
+        demosaiced->output(x/samplingFactor, y/samplingFactor, c));
     processed(x, y, c) = cast<uint8_t>(clamp(forDisplay, 0, 255));
 }
 
