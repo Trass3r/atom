@@ -131,10 +131,12 @@ struct Demosaic final : public Halide::Generator<Demosaic>
 
         // green pixels: red through bilinear interpolation of R-G
         // B-Gb = ( B-(Gb-1) + B-(Gb+1) ) / 2
-        Bgb(x, y) = Gb(x, y) + ( B(x-1, y)-Gb(x-1, y) + B(x, y)-Gb(x-1, y) )/2;
-        Rgb(x, y) = Gb(x, y) + ( R(x-1, y)-Gr(x-1, y) + R(x, y)-Gr(x-1, y) )/2;
-        Bgr(x, y) = Gb(x, y) + ( B(x, y)-Gb(x, y) + B(x+1, y)-Gb(x+1, y) )/2;
-        Rgr(x, y) = Gr(x, y) + ( R(x, y)-Gr(x, y) + R(x+1, y)-Gr(x+1, y) )/2;
+        // horizontal interpolation
+        Bgb(x, y) = Gb(x, y) + ( B(x-1, y)-outGb(x-1, y) + B(x, y)-outGb(x, y) )/2;
+        Rgr(x, y) = Gr(x, y) + ( R(x, y)-outGr(x, y) + R(x+1, y)-outGr(x+1, y) )/2;
+        // vertical interpolation
+        Bgr(x, y) = Gr(x, y) + ( B(x, y)-outGb(x, y) + B(x, y+1)-outGb(x, y+1) )/2;
+        Rgb(x, y) = Gb(x, y) + ( R(x, y-1)-outGr(x, y-1) + R(x, y)-outGr(x, y) )/2;
 
 #if 0
         output(x, y, c) = Rgb(x/2, y/2);
@@ -213,7 +215,7 @@ struct CameraPipe final : public Halide::Generator<CameraPipe>
     Output<Buffer<uint8_t>> processed{"processed", 3};
 
     Input<bool> showRaw{"showRaw", false};
-    Input<int> samplingFactor{"samplingFactor", 4, 1, 10};
+    Input<int> samplingFactor{"samplingFactor", 9, 1, 12};
 
     void generate();
     void schedule();
