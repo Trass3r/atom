@@ -46,8 +46,6 @@ struct Demosaic final : public Halide::Generator<Demosaic>
     Input<Func> input{"input", Int(16), 3}; // in RGGB bands
     Output<Func> output{"output", Int(16), 3};
 
-    Input<int> hmm{"hmm", false};
-
     Func _(R), _(Gr), _(Gb), _(B);
     Func _(outGb), _(outGr);
 
@@ -57,8 +55,6 @@ struct Demosaic final : public Halide::Generator<Demosaic>
         Gb(x, y) = input(x, y, 1);
         Gr(x, y) = input(x, y, 2);
         B (x, y) = input(x, y, 3);
-
-        // TODO: BoundaryConditions::repeat_edge
 
         // pattern:
         // G B
@@ -254,7 +250,7 @@ void CameraPipe::generate()
                         (x%2)==0 && (y%2) == 1, 0,
                         2));
     demosaiced = create<Demosaic>();
-    demosaiced->apply(deinterleaved, 0);
+    demosaiced->apply(deinterleaved);
 
     Expr forDisplay = select(showRaw,
         raw(x/samplingFactor, y/samplingFactor),
@@ -307,4 +303,77 @@ void CameraPipe::schedule()
     }
 }
 
-HALIDE_REGISTER_GENERATOR(CameraPipe, generator)
+//HALIDE_REGISTER_GENERATOR(CameraPipe, generator)
+
+struct FromRaw final : public Halide::Generator<FromRaw>
+{
+    Input<Buffer<uint16_t>> input{"input", 2};
+    Output<Buffer<int16_t>> processed{"processed", 3};
+
+    void generate();
+    void schedule();
+
+    Func _(deinterleaved);
+    Func _(base);
+    std::unique_ptr<Demosaic> demosaiced;
+};
+
+void FromRaw::generate()
+{
+    base(x, y) = cast<int16_t>(BoundaryConditions::mirror_interior(input)(x, y));
+
+	// R G
+	// G B
+    deinterleaved(x, y, c) = select(c == 0, base(2*x, 2*y),     // red
+                                    c == 3, base(2*x+1, 2*y+1), // blue
+                                    c == 1, base(2*x, 2*y+1),   // Gb
+                                            base(2*x+1, 2*y));  // Gr
+
+    demosaiced = create<Demosaic>();
+    demosaiced->apply(deinterleaved);
+
+    processed(x, y, c) = demosaiced->output(x, y, c);
+	processed.dim(0).set_stride(3);
+	processed.dim(2).set_stride(1);
+}
+
+void FromRaw::schedule()
+{
+    if (auto_schedule)
+    {
+        input.dim(0).set_bounds_estimate(0, 8000);
+        input.dim(1).set_bounds_estimate(0, 5320);
+
+        processed
+            .estimate(c, 0, 3)
+            .estimate(x, 0, 8000)
+            .estimate(y, 0, 5320);
+    }
+    else
+    {
+        base.compute_root();
+
+        Expr out_width = processed.width();
+        Expr out_height = processed.height();
+        int vec = get_target().natural_vector_size(UInt(16));
+        Expr strip_size = 32;
+        strip_size = (strip_size / 2) * 2;
+        processed
+            .compute_root()
+            .split(x, x_o, x_i, 64)
+            .reorder(x_i, y, c, x_o)
+            .split(x_i, x_i_vo, x_i_vi, 32)
+            .vectorize(x_i_vi)
+            //.parallel(x_o)
+        ;
+
+// We can generate slightly better code if we know the splits divide the extent.
+        processed
+            .bound(c, 0, 3)
+//          .bound(x, 0, ((out_width)/(2*vec))*(2*vec))
+//          .bound(y, 0, (out_height/strip_size)*strip_size)
+        ;
+    }
+}
+
+HALIDE_REGISTER_GENERATOR(FromRaw, generator)
